@@ -1,8 +1,24 @@
-# Display Outline for Cursor (Hammerspoon)
+# Cursor Outline (macOS)
 
-Draws an always-on-top outline around the **active display**, plus a temporary **cursor spotlight** while holding a hotkey.
+A lightweight cursor spotlight and active-display outline for macOS.
 
 **Hotkey:** `Ctrl` + `Alt` + `Cmd` + `F` (hold)
+
+This repo currently contains:
+- A native macOS menu bar app (work-in-progress): `macos-app/`
+- A Hammerspoon implementation: `init.lua` (install via `./install.sh`)
+
+## Native App (WIP)
+1) Open `macos-app/CursorOutline.xcodeproj` in Xcode
+2) Select a signing team if Xcode prompts you
+3) Run
+
+Behavior (native app):
+- Cursor spotlight shows while the hotkey is held.
+- Display outline only shows when you have 2+ (non-mirrored) displays, and only on the display containing the cursor.
+
+## Hammerspoon Version
+Draws an always-on-top outline around the **active display**, plus a temporary **cursor spotlight** while holding a hotkey.
 
 ## Features
 - Menubar icon with quick settings (style, color, thickness, sound).
