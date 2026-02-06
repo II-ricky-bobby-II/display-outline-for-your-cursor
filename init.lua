@@ -1,5 +1,15 @@
 -- Cursor Outline (menubar + full-screen outline)
 -- Hotkey: Ctrl+Alt+Cmd+F
+
+local PROJECT_DIR = (function()
+  local src = debug.getinfo(1, "S").source
+  if type(src) == "string" and src:sub(1, 1) == "@" then
+    local p = src:sub(2):match("(.*/)")
+    if p then return p end
+  end
+  return hs.configdir .. "/"
+end)()
+
 local function fileExists(p)
   local f = io.open(p, "r")
   if f then f:close() return true end
@@ -13,11 +23,19 @@ local config = {
   iconPath = "assets/cursor_outline_icon.png",
 }
 
-local userConfigPath = hs.configdir .. "/config.lua"
+local userConfigPath = hs.configdir .. "/display-outline-for-your-cursor.config.lua"
 if fileExists(userConfigPath) then
   local ok, userCfg = pcall(dofile, userConfigPath)
   if ok and type(userCfg) == "table" then
     for k, v in pairs(userCfg) do config[k] = v end
+  end
+else
+  local legacyPath = hs.configdir .. "/config.lua"
+  if fileExists(legacyPath) then
+    local ok, userCfg = pcall(dofile, legacyPath)
+    if ok and type(userCfg) == "table" then
+      for k, v in pairs(userCfg) do config[k] = v end
+    end
   end
 end
 
@@ -39,7 +57,7 @@ local DEFAULTS = {
   feedback_pop = true,
 }
 
-local ANIM_SPEED = 0.50
+local ANIM_SPEED = 0.50 * (tonumber(config.speedMultiplier) or 1.0)
 
 local COLORS = {
   Red     = { red = 1.00, green = 0.20, blue = 0.20 },
@@ -61,7 +79,7 @@ local STYLE_LABELS = {
 
 local STYLE_ORDER = { "solid", "pulse", "rainbow" }
 local COLOR_ORDER = { "System", "Red", "Orange", "Yellow", "Green", "Blue", "Purple", "Cyan", "Magenta", "White" }
-local MATERIAL_ORDER = { "Clear", "Tinted", "Off" }
+local THICKNESS_ORDER = { 4, 6, 8, 10 }
 
 _G.CursorOutline = _G.CursorOutline or {}
 local M = _G.CursorOutline
@@ -76,20 +94,29 @@ local function settingSet(key, value)
   hs.settings.set(KEY_PREFIX .. key, value)
 end
 
+local function normalizeThickness(value)
+  local n = tonumber(value)
+  if not n then return DEFAULTS.thickness end
+  for _, option in ipairs(THICKNESS_ORDER) do
+    if n == option then return n end
+  end
+  return DEFAULTS.thickness
+end
+
 M.state = M.state or {
   enabled = settingGet("enabled", DEFAULTS.enabled),
   style = settingGet("style", DEFAULTS.style),
   color = settingGet("color", DEFAULTS.color),
-  thickness = DEFAULTS.thickness,
+  thickness = settingGet("thickness", DEFAULTS.thickness),
   icon_hpad = DEFAULTS.icon_hpad,
 
-  spotlight_material = settingGet("spotlight_material", DEFAULTS.spotlight_material),
-  dim_tint = settingGet("dim_tint", DEFAULTS.dim_tint),
-  auto_hide_fullscreen_video = settingGet("auto_hide_fullscreen_video", DEFAULTS.auto_hide_fullscreen_video),
-  auto_hide_screen_sharing = settingGet("auto_hide_screen_sharing", DEFAULTS.auto_hide_screen_sharing),
+  spotlight_material = DEFAULTS.spotlight_material,
+  dim_tint = DEFAULTS.dim_tint,
+  auto_hide_fullscreen_video = DEFAULTS.auto_hide_fullscreen_video,
+  auto_hide_screen_sharing = DEFAULTS.auto_hide_screen_sharing,
 
   feedback_sound = settingGet("feedback_sound", DEFAULTS.feedback_sound),
-  feedback_pop = settingGet("feedback_pop", DEFAULTS.feedback_pop),
+  feedback_pop = DEFAULTS.feedback_pop,
 }
 
 if M.state.style == "blink" then
@@ -97,7 +124,21 @@ if M.state.style == "blink" then
   settingSet("style", "solid")
 end
 
-M.state.thickness = DEFAULTS.thickness
+M.state.thickness = normalizeThickness(M.state.thickness)
+settingSet("thickness", M.state.thickness)
+
+M.state.spotlight_material = DEFAULTS.spotlight_material
+M.state.dim_tint = DEFAULTS.dim_tint
+M.state.auto_hide_fullscreen_video = DEFAULTS.auto_hide_fullscreen_video
+M.state.auto_hide_screen_sharing = DEFAULTS.auto_hide_screen_sharing
+settingSet("spotlight_material", M.state.spotlight_material)
+settingSet("dim_tint", M.state.dim_tint)
+settingSet("auto_hide_fullscreen_video", M.state.auto_hide_fullscreen_video)
+settingSet("auto_hide_screen_sharing", M.state.auto_hide_screen_sharing)
+
+M.state.feedback_pop = DEFAULTS.feedback_pop
+settingSet("feedback_pop", M.state.feedback_pop)
+
 M.state.icon_hpad = DEFAULTS.icon_hpad
 settingSet("icon_hpad", M.state.icon_hpad)
 
@@ -494,7 +535,9 @@ local function isEffectivelyAllowed()
   return not M.ctx.suppressed
 end
 
-local ICON_PATH = hs.configdir .. "/cursor_outline_icon.png"
+local ICON_FALLBACK_PATH = hs.configdir .. "/cursor_outline_icon.png"
+local ICON_SIZE = 32
+
 local ICON_B64 = [[
 iVBORw0KGgoAAAANSUhEUgAAABIAAAASCAYAAABWzo5XAAAAQklEQVR4nGNgGGyA
 Ecb4////f7ggIyMjLjF09TBxJmq5iAXDiUg2o7tiiIL/UECueqoFNtUMGgWEAdl5
@@ -505,6 +548,19 @@ local function loadMenubarIcon()
   local img = nil
 
   do
+    local p = PROJECT_DIR .. (config.iconPath or "assets/cursor_outline_icon.png")
+    local ok, v = pcall(function()
+      if hs.image and hs.image.imageFromPath then
+        return hs.image.imageFromPath(p)
+      end
+      return nil
+    end)
+    if ok and v then
+      img = v
+    end
+  end
+
+  if not img then
     local ok, sym = pcall(function()
       if hs.image and hs.image.imageFromSystemSymbolName then
         return hs.image.imageFromSystemSymbolName("cursorarrow.rays", { })
@@ -527,26 +583,23 @@ local function loadMenubarIcon()
     end
 
     if raw then
-      local f = io.open(ICON_PATH, "wb")
+      local f = io.open(ICON_FALLBACK_PATH, "wb")
       if f then
         f:write(raw)
         f:close()
       end
     end
 
-    img = hs.image.imageFromPath(ICON_PATH)
+    img = hs.image.imageFromPath(ICON_FALLBACK_PATH)
   end
 
   if img then
     pcall(function() img:setTemplate(true) end)
     pcall(function() img:template(true) end)
     pcall(function()
-      local sz = img:size()
-      if not (sz and sz.h == 18) then
-        local okSize = pcall(function() img:size({ w = 18, h = 18 }) end)
-        if not okSize then
-          pcall(function() img:setSize({ w = 18, h = 18 }) end)
-        end
+      local okSize = pcall(function() img:size({ w = ICON_SIZE, h = ICON_SIZE }) end)
+      if not okSize then
+        pcall(function() img:setSize({ w = ICON_SIZE, h = ICON_SIZE }) end)
       end
     end)
   end
@@ -613,7 +666,7 @@ end
 local function ensureCanvasForScreen(screen, profile)
   local id = screen:id()
   local full = screen:fullFrame()
-  local t = M.state.thickness
+  local t = (M.state.thickness or 4) + (tonumber(config.borderExtraPixels) or 0)
 
   local half = t / 2
   local pad = math.ceil(half) + 2
@@ -757,6 +810,7 @@ local function ensureCanvasForScreen(screen, profile)
   return entry
 end
 
+
 local function refreshScreens()
   local profile = spotlightProfile()
   local key = spotlightProfileKey(profile)
@@ -804,7 +858,7 @@ local function clearOutlinePop()
   if M._outlinePopScreenId then
     local entry = M.screens[M._outlinePopScreenId]
     if entry and entry.canvas and entry.canvas[1] then
-      entry.canvas[1].strokeWidth = M.state.thickness
+      entry.canvas[1].strokeWidth = (M.state.thickness or 4) + (tonumber(config.borderExtraPixels) or 0)
     end
   end
 
@@ -835,7 +889,7 @@ local function outlinePopAtCursorScreen()
   if not entry then return end
   if not (entry.canvas and entry.canvas[1]) then return end
 
-  entry.canvas[1].strokeWidth = M.state.thickness + OUTLINE_POP_EXTRA_PX
+  entry.canvas[1].strokeWidth = (M.state.thickness or 4) + (tonumber(config.borderExtraPixels) or 0) + OUTLINE_POP_EXTRA_PX
   M._outlinePopScreenId = screen:id()
 
   M._outlinePopTimer = hs.timer.doAfter(OUTLINE_POP_DURATION, function()
@@ -1205,6 +1259,8 @@ local function startMainLoop()
   updateAllCanvases()
 end
 
+local markMenuDirty
+
 local function setEnabled(v)
   if not v then
     stopSpotlightFollow()
@@ -1212,49 +1268,37 @@ local function setEnabled(v)
   M.state.enabled = v
   settingSet("enabled", v)
   startMainLoop()
-  M._menuDirty = true
+  markMenuDirty()
 end
 
 local function setStyle(style)
   M.state.style = style
   settingSet("style", style)
   startMainLoop()
-  M._menuDirty = true
+  markMenuDirty()
 end
 
 local function setColor(name)
   M.state.color = name
   settingSet("color", name)
   updateAllCanvases()
-  M._menuDirty = true
-end
-
-local function setMaterial(name)
-  M.state.spotlight_material = name
-  settingSet("spotlight_material", name)
-  spotlightRender()
-  M._menuDirty = true
+  markMenuDirty()
 end
 
 local function setToggle(key, v)
   M.state[key] = v
   settingSet(key, v)
   spotlightRender()
-  M._menuDirty = true
+  markMenuDirty()
 end
 
-local function a11ySummaryLine()
-  local parts = {}
-  if M.a11y.reduceTransparency then parts[#parts+1] = "Reduce Transparency" end
-  if M.a11y.increaseContrast then parts[#parts+1] = "Increase Contrast" end
-  if M.a11y.reduceMotion then parts[#parts+1] = "Reduce Motion" end
-  if #parts == 0 then return "Accessibility: Default" end
-  return "Accessibility: " .. table.concat(parts, " • ")
-end
-
-local function contextSummaryLine()
-  if not M.ctx.suppressed then return "Auto-Hide: Ready" end
-  return "Auto-Hide: " .. (M.ctx.reason or "On")
+local function setThickness(px)
+  local value = normalizeThickness(px)
+  if M.state.thickness == value then return end
+  M.state.thickness = value
+  settingSet("thickness", value)
+  startMainLoop()
+  markMenuDirty()
 end
 
 local function menuSignature(payload)
@@ -1264,80 +1308,54 @@ end
 local function buildMenu()
   local styleMenu = {}
   for _, key in ipairs(STYLE_ORDER) do
+    local styleKey = key
     styleMenu[#styleMenu+1] = {
-      title = STYLE_LABELS[key],
-      checked = (M.state.style == key),
-      fn = function() setStyle(key) end,
+      title = STYLE_LABELS[styleKey],
+      checked = (M.state.style == styleKey),
+      fn = function() setStyle(styleKey) end,
     }
   end
 
   local colorMenu = {}
   for _, name in ipairs(COLOR_ORDER) do
+    local colorName = name
     colorMenu[#colorMenu+1] = {
-      title = name,
-      checked = (M.state.color == name),
-      fn = function() setColor(name) end,
+      title = colorName,
+      checked = (M.state.color == colorName),
+      fn = function() setColor(colorName) end,
     }
   end
 
-  local materialMenu = {}
-  for _, name in ipairs(MATERIAL_ORDER) do
-    materialMenu[#materialMenu+1] = {
-      title = name,
-      checked = (M.state.spotlight_material == name),
-      fn = function() setMaterial(name) end,
+  local thicknessMenu = {}
+  for _, px in ipairs(THICKNESS_ORDER) do
+    local thickness = px
+    thicknessMenu[#thicknessMenu+1] = {
+      title = tostring(thickness) .. "px",
+      checked = (M.state.thickness == thickness),
+      fn = function() setThickness(thickness) end,
     }
   end
 
-  local feedbackMenu = {
+  local toggleTitle = "Enable Cursor Outline"
+  if M.state.enabled then
+    toggleTitle = "Disable Cursor Outline"
+    if not isEffectivelyAllowed() then
+      toggleTitle = "Disable Cursor Outline (Hidden)"
+    end
+  end
+
+  return {
+    { title = "Cursor Outline", disabled = true },
+    { title = "Hold Ctrl⌥⌘F to spotlight cursor", disabled = true },
+    { title = "-" },
+    { title = "Animation", menu = styleMenu },
+    { title = "Outline Color", menu = colorMenu },
+    { title = "Outline Thickness", menu = thicknessMenu },
     {
       title = "Sound",
       checked = M.state.feedback_sound == true,
       fn = function() setToggle("feedback_sound", not M.state.feedback_sound) end,
     },
-    {
-      title = "Outline Pop",
-      checked = M.state.feedback_pop == true,
-      fn = function() setToggle("feedback_pop", not M.state.feedback_pop) end,
-    },
-  }
-
-  local autoHideMenu = {
-    {
-      title = "In Full-Screen Video",
-      checked = M.state.auto_hide_fullscreen_video == true,
-      fn = function() setToggle("auto_hide_fullscreen_video", not M.state.auto_hide_fullscreen_video) end,
-    },
-    {
-      title = "During Screen Sharing",
-      checked = M.state.auto_hide_screen_sharing == true,
-      fn = function() setToggle("auto_hide_screen_sharing", not M.state.auto_hide_screen_sharing) end,
-    },
-  }
-
-  local spotlightMenu = {
-    { title = "Material", menu = materialMenu },
-    {
-      title = "Dim Tint",
-      checked = M.state.dim_tint == true,
-      fn = function() setToggle("dim_tint", not M.state.dim_tint) end,
-    },
-    { title = "-" },
-    { title = "Auto-Hide", menu = autoHideMenu },
-  }
-
-  local toggleTitle = M.state.enabled and "Disable Cursor Outline" or "Enable Cursor Outline"
-
-  return {
-    { title = "Cursor Outline", disabled = true },
-    { title = "Hold Ctrl⌥⌘F to spotlight cursor", disabled = true },
-    { title = a11ySummaryLine(), disabled = true },
-    { title = contextSummaryLine(), disabled = true },
-    { title = "-" },
-    { title = "Animation", menu = styleMenu },
-    { title = "Outline Color", menu = colorMenu },
-    { title = "Spotlight", menu = spotlightMenu },
-    { title = "Feedback", menu = feedbackMenu },
     { title = "-" },
     { title = toggleTitle, fn = function() setEnabled(not M.state.enabled) end },
   }
@@ -1361,7 +1379,7 @@ local function applyMenuIfNeeded()
   M._menuDirty = false
 end
 
-local function markMenuDirty()
+markMenuDirty = function()
   M._menuDirty = true
   if not M._menuApplyTimer then
     M._menuApplyTimer = hs.timer.doAfter(0.08, function()
