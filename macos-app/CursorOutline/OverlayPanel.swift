@@ -4,7 +4,7 @@ final class OverlayPanel: NSPanel {
   let overlayView: OverlayView
 
   init(screen: NSScreen) {
-    overlayView = OverlayView(frame: screen.frame)
+    overlayView = OverlayView(frame: NSRect(origin: .zero, size: screen.frame.size))
     overlayView.autoresizingMask = [.width, .height]
 
     super.init(
