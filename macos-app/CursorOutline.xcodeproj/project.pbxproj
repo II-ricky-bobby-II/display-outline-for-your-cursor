@@ -13,6 +13,7 @@
 		7802BA153F6C0404C27BB39C /* ScreenUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94B6DF4F9DDEECEE71D50957 /* ScreenUtils.swift */; };
 		7E71A11981EE5F197A680E58 /* HotKeyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5E36592022DF64650570B6 /* HotKeyManager.swift */; };
 		7EC82B1FDDAFFA9ECFE98E68 /* OverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 814069DF8275CED596FB231C /* OverlayView.swift */; };
+		8B0E70D82CFFB403C02C1D2A /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAEE9AAC45C498B284EAA32F /* main.swift */; };
 		AB878EB759CB825E78A9E5C7 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 15E5BD73686F05BF875188F6 /* Cocoa.framework */; };
 		E54FA15BACD59A7872D63D4D /* OverlayPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3A3756A5ECFD0C6EB7B638A /* OverlayPanel.swift */; };
 /* End PBXBuildFile section */
@@ -28,6 +29,7 @@
 		9FA2498DCA58D24D1CCEFD76 /* AppDelegate.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		C3A3756A5ECFD0C6EB7B638A /* OverlayPanel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = OverlayPanel.swift; sourceTree = "<group>"; };
 		C758543DBFF62EE823B0D354 /* OverlayController.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = OverlayController.swift; sourceTree = "<group>"; };
+		DAEE9AAC45C498B284EAA32F /* main.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -87,6 +89,7 @@
 				814069DF8275CED596FB231C /* OverlayView.swift */,
 				94B6DF4F9DDEECEE71D50957 /* ScreenUtils.swift */,
 				9A92688D48E2C7DD096B5AA3 /* Info.plist */,
+				DAEE9AAC45C498B284EAA32F /* main.swift */,
 			);
 			name = CursorOutline;
 			path = CursorOutline;
@@ -162,6 +165,7 @@
 				E54FA15BACD59A7872D63D4D /* OverlayPanel.swift in Sources */,
 				7EC82B1FDDAFFA9ECFE98E68 /* OverlayView.swift in Sources */,
 				7802BA153F6C0404C27BB39C /* ScreenUtils.swift in Sources */,
+				8B0E70D82CFFB403C02C1D2A /* main.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

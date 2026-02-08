@@ -1,6 +1,5 @@
 import AppKit
 
-@MainActor
 final class OverlayController {
   var isEnabled: Bool = true {
     didSet {
@@ -77,9 +76,7 @@ final class OverlayController {
     stopOutlineLoop()
     let timer = Timer(timeInterval: 0.10, repeats: true) { [weak self] _ in
       guard let self else { return }
-      Task { @MainActor in
-        self.updateOutline()
-      }
+      self.updateOutline()
     }
     RunLoop.main.add(timer, forMode: .common)
     outlineTimer = timer
@@ -94,9 +91,7 @@ final class OverlayController {
     if spotlightTimer != nil { return }
     let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
       guard let self else { return }
-      Task { @MainActor in
-        self.updateSpotlight()
-      }
+      self.updateSpotlight()
     }
     RunLoop.main.add(timer, forMode: .common)
     spotlightTimer = timer
