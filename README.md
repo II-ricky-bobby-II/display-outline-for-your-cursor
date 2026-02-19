@@ -1,19 +1,17 @@
-cd "/Users/blake/Documents/Display Outline for Cursor"
-cat > README.md <<'EOF'
-# Display Outline for Cursor (Hammerspoon)
+# Cursor Outline (macOS)
 
-## Install
-1) Install Hammerspoon
-2) Download and unzip this repo
-3) In Terminal, run:
-   ./install.sh
+A lightweight cursor spotlight and active-display outline for macOS.
 
-## Configure
-Copy the example config:
-cp config.example.lua config.lua
-Then edit config.lua and reload:
-open -g "hammerspoon://reload"
+**Hotkey:** `Ctrl` + `Alt` + `Cmd` + `F` (hold)
 
-## Uninstall
-./uninstall.sh
-EOF
+This repo contains a native macOS menu bar app:
+- `macos-app/`
+
+## Run
+1) Open `macos-app/CursorOutline.xcodeproj` in Xcode
+2) Select a signing team if Xcode prompts you
+3) Run
+
+## Behavior
+- Cursor spotlight shows while the hotkey is held.
+- Display outline only shows when you have 2+ (non-mirrored) displays, and only on the display containing the cursor.

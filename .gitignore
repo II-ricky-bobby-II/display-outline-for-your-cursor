@@ -1,2 +1,13 @@
 .DS_Store
 config.lua
+
+# Xcode
+DerivedData/
+*.xcuserstate
+*.xccheckout
+*.xcscmblueprint
+xcuserdata/
+
+# SwiftPM
+.build/
+.swiftpm/
