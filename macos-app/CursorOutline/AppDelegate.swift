@@ -1,24 +1,57 @@
 import AppKit
-import Carbon
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private var statusItem: NSStatusItem?
   private var statusMenu: NSMenu?
+
   private let overlayController = OverlayController()
   private let hotKeyManager = HotKeyManager()
+  private let settingsStore = AppSettingsStore.shared
+  private let launchAtLoginManager = LaunchAtLoginManager()
+  private let diagnosticsExporter = DiagnosticsExporter()
 
-  private var hotKeyHintText: String = "Hotkey: Control+Option+Command+F (hold)"
-  private var hotKeyEventText: String = "Hotkey event: none"
-  private var hotKeyAvailable: Bool = true
+  private var preferencesWindowController: PreferencesWindowController?
+
+  private var settings: AppSettings = .defaults
+  private var hotKeyStatusText: String = "Hotkey: Unconfigured"
+  private var hotKeyAvailable = false
+  private var activeHotKey: HotKeyConfig?
+  private var lastDiagnosticsArchiveName: String?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
-    NSLog("CursorOutline: didFinishLaunching")
+    settings = settingsStore.load()
+    AppLogger.shared.log(.info, "Cursor Outline launched")
 
-    // Keep behavior consistent with a lightweight menu-bar utility.
     NSApp.setActivationPolicy(.accessory)
 
+    configureStatusItem()
+    configureOverlay()
+    configureHotKeyCallbacks()
+
+    _ = applyHotKeyRegistration()
+    syncLaunchAtLoginPreference(showAlertOnError: false)
+  }
+
+  func menuWillOpen(_ menu: NSMenu) {
+    guard menu == statusMenu else { return }
+
+    if let enabledItem = menu.item(withTag: MenuTag.enabled.rawValue) {
+      enabledItem.state = overlayController.isEnabled ? .on : .off
+    }
+
+    if let hotKeyItem = menu.item(withTag: MenuTag.hotkeyStatus.rawValue) {
+      hotKeyItem.title = hotKeyStatusText
+    }
+
+    if let outlineItem = menu.item(withTag: MenuTag.outlineStatus.rawValue) {
+      outlineItem.title = overlayController.outlineStatusText
+    }
+  }
+
+  private func configureStatusItem() {
     statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     statusItem?.isVisible = true
+
     if let button = statusItem?.button {
       button.title = ""
       button.toolTip = "Cursor Outline"
@@ -32,81 +65,79 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     menu.delegate = self
     statusItem?.menu = menu
     statusMenu = menu
+  }
 
+  private func configureOverlay() {
+    overlayController.applyAppearance(
+      thickness: settings.outlineThickness,
+      color: settings.outlineColor,
+      spotlightRadius: settings.spotlightRadius
+    )
     overlayController.start()
+  }
 
+  private func configureHotKeyCallbacks() {
     hotKeyManager.onPressed = { [weak self] in
-      NSLog("CursorOutline: hotkey pressed")
       DispatchQueue.main.async {
-        self?.hotKeyEventText = "Hotkey event: pressed"
-        self?.overlayController.beginSpotlight()
+        guard let self else { return }
+        self.overlayController.beginSpotlight()
+        if let activeHotKey = self.activeHotKey {
+          self.hotKeyStatusText = "Hotkey active: \(activeHotKey.displayString)"
+        }
       }
     }
+
     hotKeyManager.onReleased = { [weak self] in
-      NSLog("CursorOutline: hotkey released")
       DispatchQueue.main.async {
-        self?.hotKeyEventText = "Hotkey event: released"
-        self?.overlayController.endSpotlight()
+        guard let self else { return }
+        self.overlayController.endSpotlight()
+        self.refreshHotKeyStatusText()
       }
-    }
-
-    registerHotKeyWithFallback()
-  }
-
-  func menuWillOpen(_ menu: NSMenu) {
-    guard menu == statusMenu else { return }
-    if let enabledItem = menu.item(withTag: MenuTag.enabled.rawValue) {
-      enabledItem.state = overlayController.isEnabled ? .on : .off
-    }
-    if let hintItem = menu.item(withTag: MenuTag.hotkeyHint.rawValue) {
-      hintItem.title = hotKeyHintText
-    }
-    if let hotKeyEventItem = menu.item(withTag: MenuTag.hotkeyEvent.rawValue) {
-      hotKeyEventItem.title = hotKeyEventText
-    }
-    if let outlineItem = menu.item(withTag: MenuTag.outlineStatus.rawValue) {
-      outlineItem.title = overlayController.outlineStatusText
-    }
-    if let diagnosticsItem = menu.item(withTag: MenuTag.diagnostics.rawValue) {
-      diagnosticsItem.title = overlayController.diagnosticsText
     }
   }
 
-  private func registerHotKeyWithFallback() {
-    hotKeyAvailable = true
-
-    let modifiers: UInt32 = UInt32(cmdKey | optionKey | controlKey)
-    let primary: (keyCode: UInt32, combo: String) = (UInt32(kVK_ANSI_F), "Control+Option+Command+F")
-    let fallback: (keyCode: UInt32, combo: String) = (UInt32(kVK_ANSI_G), "Control+Option+Command+G")
-
-    func updateHint(available: Bool, combo: String) {
-      hotKeyAvailable = available
-      hotKeyHintText = available ? "Hotkey: \(combo) (hold)" : "Hotkey unavailable (\(combo) in use)"
-      if let menu = statusMenu, let hintItem = menu.item(withTag: MenuTag.hotkeyHint.rawValue) {
-        hintItem.title = hotKeyHintText
+  @discardableResult
+  private func applyHotKeyRegistration() -> HotKeyRegistrationOutcome {
+    do {
+      try hotKeyManager.register(hotKey: settings.hotKey)
+      activeHotKey = settings.hotKey
+      hotKeyAvailable = true
+      refreshHotKeyStatusText()
+      return .configured
+    } catch let error as HotKeyRegistrationError {
+      if error.isConflict {
+        AppLogger.shared.log(.warning, "Configured hotkey conflict: \(settings.hotKey.displayString)")
+      } else {
+        AppLogger.shared.log(.error, "Failed to register configured hotkey: \(error.localizedDescription)")
       }
+    } catch {
+      AppLogger.shared.log(.error, "Failed to register configured hotkey: \(error.localizedDescription)")
     }
 
     do {
-      try hotKeyManager.register(keyCode: primary.keyCode, modifiers: modifiers)
-      NSLog("CursorOutline: registered hotkey \(primary.combo)")
-      hotKeyEventText = "Hotkey event: registered \(primary.combo)"
-      updateHint(available: true, combo: primary.combo)
-      return
+      try hotKeyManager.register(hotKey: .fallback)
+      activeHotKey = .fallback
+      hotKeyAvailable = true
+      hotKeyStatusText = "Hotkey in use; temporarily using \(HotKeyConfig.fallback.displayString)"
+      AppLogger.shared.log(.warning, "Using fallback hotkey: \(HotKeyConfig.fallback.displayString)")
+      return .fallbackDueToConflict
     } catch {
-      NSLog("CursorOutline: failed to register hotkey \(primary.combo): \(error)")
+      activeHotKey = nil
+      hotKeyAvailable = false
+      hotKeyStatusText = "Hotkey unavailable (in use). Change it in Preferences."
+      AppLogger.shared.log(.warning, "No global hotkey available")
+      return .unavailable
     }
+  }
 
-    do {
-      try hotKeyManager.register(keyCode: fallback.keyCode, modifiers: modifiers)
-      NSLog("CursorOutline: registered hotkey \(fallback.combo)")
-      hotKeyEventText = "Hotkey event: registered \(fallback.combo)"
-      updateHint(available: true, combo: fallback.combo)
-      return
-    } catch {
-      updateHint(available: false, combo: primary.combo)
-      hotKeyEventText = "Hotkey event: unavailable"
-      NSLog("CursorOutline: failed to register hotkey \(fallback.combo): \(error)")
+  private func refreshHotKeyStatusText() {
+    if let activeHotKey {
+      let suffix = activeHotKey == settings.hotKey ? "" : " (fallback)"
+      hotKeyStatusText = "Hotkey: \(activeHotKey.displayString)\(suffix)"
+    } else if hotKeyAvailable {
+      hotKeyStatusText = "Hotkey: ready"
+    } else {
+      hotKeyStatusText = "Hotkey unavailable (in use). Change it in Preferences."
     }
   }
 
@@ -119,31 +150,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     enabledItem.tag = MenuTag.enabled.rawValue
     menu.addItem(enabledItem)
 
-    let hintItem = NSMenuItem(title: hotKeyHintText, action: nil, keyEquivalent: "")
-    hintItem.isEnabled = false
-    hintItem.tag = MenuTag.hotkeyHint.rawValue
-    menu.addItem(hintItem)
-
-    let hotKeyEventItem = NSMenuItem(title: hotKeyEventText, action: nil, keyEquivalent: "")
-    hotKeyEventItem.isEnabled = false
-    hotKeyEventItem.tag = MenuTag.hotkeyEvent.rawValue
-    menu.addItem(hotKeyEventItem)
+    let hotKeyItem = NSMenuItem(title: hotKeyStatusText, action: nil, keyEquivalent: "")
+    hotKeyItem.isEnabled = false
+    hotKeyItem.tag = MenuTag.hotkeyStatus.rawValue
+    menu.addItem(hotKeyItem)
 
     let outlineItem = NSMenuItem(title: overlayController.outlineStatusText, action: nil, keyEquivalent: "")
     outlineItem.isEnabled = false
     outlineItem.tag = MenuTag.outlineStatus.rawValue
     menu.addItem(outlineItem)
 
-    let diagnosticsItem = NSMenuItem(title: overlayController.diagnosticsText, action: nil, keyEquivalent: "")
-    diagnosticsItem.isEnabled = false
-    diagnosticsItem.tag = MenuTag.diagnostics.rawValue
-    menu.addItem(diagnosticsItem)
-
     menu.addItem(.separator())
 
     let testItem = NSMenuItem(title: "Test Spotlight", action: #selector(testSpotlight(_:)), keyEquivalent: "")
     testItem.target = self
     menu.addItem(testItem)
+
+    let preferencesItem = NSMenuItem(title: "Preferences...", action: #selector(openPreferences(_:)), keyEquivalent: ",")
+    preferencesItem.target = self
+    menu.addItem(preferencesItem)
+
+    let exportItem = NSMenuItem(title: "Export Diagnostics...", action: #selector(exportDiagnostics(_:)), keyEquivalent: "")
+    exportItem.target = self
+    menu.addItem(exportItem)
+
+    let reportItem = NSMenuItem(title: "Report Issue", action: #selector(reportIssue(_:)), keyEquivalent: "")
+    reportItem.target = self
+    menu.addItem(reportItem)
+
+    let updatesItem = NSMenuItem(title: "Check for Updates", action: #selector(checkForUpdates(_:)), keyEquivalent: "")
+    updatesItem.target = self
+    menu.addItem(updatesItem)
 
     menu.addItem(.separator())
 
@@ -157,18 +194,164 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   @objc private func toggleEnabled(_ sender: NSMenuItem) {
     overlayController.isEnabled.toggle()
     sender.state = overlayController.isEnabled ? .on : .off
-
-    if let menu = statusMenu, let outlineItem = menu.item(withTag: MenuTag.outlineStatus.rawValue) {
-      outlineItem.title = overlayController.outlineStatusText
-    }
   }
 
   @objc private func testSpotlight(_ sender: Any?) {
-    hotKeyEventText = "Hotkey event: Test Spotlight clicked"
     overlayController.beginSpotlight()
     DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
       self?.overlayController.endSpotlight()
+      self?.refreshHotKeyStatusText()
     }
+  }
+
+  @objc private func openPreferences(_ sender: Any?) {
+    if preferencesWindowController == nil {
+      preferencesWindowController = PreferencesWindowController(settings: settings) { [weak self] newSettings in
+        self?.applySettings(newSettings)
+      }
+    }
+
+    preferencesWindowController?.update(settings: settings)
+    preferencesWindowController?.showWindow(nil)
+    NSApp.activate(ignoringOtherApps: true)
+  }
+
+  private func applySettings(_ newSettings: AppSettings) {
+    var next = newSettings.sanitized
+    let hotKeyDidChange = next.hotKey != settings.hotKey
+
+    if next.launchAtLogin != settings.launchAtLogin {
+      do {
+        try launchAtLoginManager.setEnabled(next.launchAtLogin)
+      } catch {
+        next.launchAtLogin = false
+        presentLaunchAtLoginError(error)
+      }
+    }
+
+    settings = next
+    settingsStore.save(next)
+
+    overlayController.applyAppearance(
+      thickness: settings.outlineThickness,
+      color: settings.outlineColor,
+      spotlightRadius: settings.spotlightRadius
+    )
+
+    let hotKeyOutcome = applyHotKeyRegistration()
+    if hotKeyDidChange {
+      presentHotKeyOutcome(hotKeyOutcome)
+    }
+    preferencesWindowController?.update(settings: settings)
+  }
+
+  private func presentHotKeyOutcome(_ outcome: HotKeyRegistrationOutcome) {
+    switch outcome {
+    case .configured:
+      return
+    case .fallbackDueToConflict:
+      let alert = NSAlert()
+      alert.alertStyle = .warning
+      alert.messageText = "Hotkey conflict detected"
+      alert.informativeText = "That hotkey is already in use. Cursor Outline is temporarily using \(HotKeyConfig.fallback.displayString)."
+      alert.addButton(withTitle: "OK")
+      alert.runModal()
+    case .unavailable:
+      let alert = NSAlert()
+      alert.alertStyle = .warning
+      alert.messageText = "Hotkey unavailable"
+      alert.informativeText = "Cursor Outline could not register any global hotkey. Choose another combination in Preferences."
+      alert.addButton(withTitle: "OK")
+      alert.runModal()
+    }
+  }
+
+  private func syncLaunchAtLoginPreference(showAlertOnError: Bool) {
+    guard settings.launchAtLogin else { return }
+
+    do {
+      try launchAtLoginManager.setEnabled(true)
+    } catch {
+      settings.launchAtLogin = false
+      settingsStore.save(settings)
+      if showAlertOnError {
+        presentLaunchAtLoginError(error)
+      }
+    }
+  }
+
+  private func presentLaunchAtLoginError(_ error: Error) {
+    let alert = NSAlert()
+    alert.alertStyle = .warning
+    alert.messageText = "Launch at login could not be enabled"
+
+    if case let LaunchAtLoginError.notInApplications(currentPath) = error {
+      var message = "Move Cursor Outline to /Applications, then try enabling launch at login again."
+      if currentPath.contains("/DerivedData/") {
+        message += "\n\nYou are currently running the app from Xcode's build output. Quit and launch the copy in /Applications."
+      }
+      message += "\n\nCurrent app path:\n\(currentPath)"
+      alert.informativeText = message
+      alert.addButton(withTitle: "Reveal App")
+      alert.addButton(withTitle: "OK")
+      let response = alert.runModal()
+      if response == .alertFirstButtonReturn {
+        NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL])
+      }
+    } else {
+      alert.informativeText = error.localizedDescription
+      alert.addButton(withTitle: "OK")
+      alert.runModal()
+    }
+
+    AppLogger.shared.log(.warning, "Launch-at-login toggle failed: \(error.localizedDescription)")
+  }
+
+  @objc private func exportDiagnostics(_ sender: Any?) {
+    let savePanel = NSSavePanel()
+    savePanel.canCreateDirectories = true
+    savePanel.allowedContentTypes = [.zip]
+    savePanel.nameFieldStringValue = diagnosticsExporter.defaultArchiveName()
+    savePanel.title = "Export Diagnostics"
+
+    guard savePanel.runModal() == .OK, let destination = savePanel.url else { return }
+
+    do {
+      let context = DiagnosticsContext(
+        settings: settings,
+        hotKeyStatus: hotKeyStatusText,
+        outlineStatus: overlayController.outlineStatusText
+      )
+      try diagnosticsExporter.exportArchive(to: destination, context: context)
+      lastDiagnosticsArchiveName = destination.lastPathComponent
+
+      let alert = NSAlert()
+      alert.alertStyle = .informational
+      alert.messageText = "Diagnostics exported"
+      alert.informativeText = destination.path
+      alert.addButton(withTitle: "Reveal in Finder")
+      alert.addButton(withTitle: "OK")
+      let response = alert.runModal()
+      if response == .alertFirstButtonReturn {
+        NSWorkspace.shared.activateFileViewerSelecting([destination])
+      }
+    } catch {
+      AppLogger.shared.log(.error, "Diagnostics export failed: \(error.localizedDescription)")
+      let alert = NSAlert(error: error)
+      alert.runModal()
+    }
+  }
+
+  @objc private func reportIssue(_ sender: Any?) {
+    let url = diagnosticsExporter.issueURL(diagnosticsArchiveName: lastDiagnosticsArchiveName)
+    NSWorkspace.shared.open(url)
+  }
+
+  @objc private func checkForUpdates(_ sender: Any?) {
+    guard let url = URL(string: "https://github.com/II-ricky-bobby-II/display-outline-for-your-cursor/releases") else {
+      return
+    }
+    NSWorkspace.shared.open(url)
   }
 
   @objc private func quit(_ sender: Any?) {
@@ -178,8 +361,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
 private enum MenuTag: Int {
   case enabled = 1
-  case hotkeyHint = 2
-  case hotkeyEvent = 3
-  case outlineStatus = 4
-  case diagnostics = 5
+  case hotkeyStatus = 2
+  case outlineStatus = 3
+}
+
+private enum HotKeyRegistrationOutcome {
+  case configured
+  case fallbackDueToConflict
+  case unavailable
 }

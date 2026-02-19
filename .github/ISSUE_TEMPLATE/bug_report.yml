@@ -5,7 +5,14 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for reporting a bug. Please include as much detail as you can.
+        Thanks for reporting a bug. If possible, attach a diagnostics archive exported from Cursor Outline (Menu bar icon -> Export Diagnostics...).
+  - type: input
+    id: app_version
+    attributes:
+      label: Cursor Outline version
+      placeholder: "e.g. 0.1.0 (1)"
+    validations:
+      required: true
   - type: input
     id: macos_version
     attributes:
@@ -13,18 +20,32 @@ body:
       placeholder: "e.g. 14.6.1"
     validations:
       required: true
-  - type: input
-    id: hammerspoon_version
+  - type: dropdown
+    id: hardware_arch
     attributes:
-      label: Hammerspoon version
-      placeholder: "e.g. 0.9.100"
+      label: Hardware
+      options:
+        - Apple silicon
+        - Intel
+        - Unsure
     validations:
-      required: false
+      required: true
+  - type: textarea
+    id: display_topology
+    attributes:
+      label: Display setup
+      description: List how many displays are connected and whether mirroring is enabled.
+      placeholder: |
+        Example:
+        - Built-in display + 1 external
+        - Mirroring off
+    validations:
+      required: true
   - type: textarea
     id: what_happened
     attributes:
       label: What happened
-      description: What did you see? Include any console errors from Hammerspoon.
+      description: What did you observe?
     validations:
       required: true
   - type: textarea
@@ -43,3 +64,10 @@ body:
         3. ...
     validations:
       required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics archive
+      description: Attach the exported zip file and paste its filename here.
+    validations:
+      required: false
