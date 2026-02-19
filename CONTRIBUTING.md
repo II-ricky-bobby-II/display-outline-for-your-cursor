@@ -4,16 +4,16 @@ Thanks for contributing.
 
 ## Development Setup
 
-1. Install Hammerspoon.
-2. Clone this repo.
-3. Run `./install.sh` to link it into `~/.hammerspoon/`.
-4. Reload Hammerspoon: `open -g "hammerspoon://reload"`.
+1. Clone this repo.
+2. Open `macos-app/CursorOutline.xcodeproj` in Xcode.
+3. Select a signing team if prompted.
+4. Build and run the `CursorOutline` scheme.
 
 ## Making Changes
 
 - Keep changes focused and easy to review.
-- Prefer macOS-friendly behavior and defensive coding (Hammerspoon can be missing APIs depending on version).
-- Update `README.md` if you change install/config behavior.
+- Prefer macOS-friendly behavior and defensive coding.
+- Update `README.md` if you change app behavior or run instructions.
 
 ## Pull Requests
 

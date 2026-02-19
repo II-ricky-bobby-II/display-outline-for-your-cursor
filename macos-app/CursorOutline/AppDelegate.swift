@@ -8,23 +8,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private let hotKeyManager = HotKeyManager()
 
   private var hotKeyHintText: String = "Hotkey: Control+Option+Command+F (hold)"
+  private var hotKeyEventText: String = "Hotkey event: none"
   private var hotKeyAvailable: Bool = true
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     NSLog("CursorOutline: didFinishLaunching")
 
-    // Keep it simple while we debug visibility: show a normal app in the Dock.
-    // We can switch back to a menu-only agent app later.
-    NSApp.setActivationPolicy(.regular)
+    // Keep behavior consistent with a lightweight menu-bar utility.
+    NSApp.setActivationPolicy(.accessory)
 
     statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     statusItem?.isVisible = true
     if let button = statusItem?.button {
-      button.title = "CO"
+      button.title = ""
       button.toolTip = "Cursor Outline"
       let image = NSImage(systemSymbolName: "cursorarrow.rays", accessibilityDescription: "Cursor Outline")
       image?.isTemplate = true
-      button.imagePosition = .imageLeading
+      button.imagePosition = .imageOnly
       button.image = image
     }
 
@@ -36,18 +36,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     overlayController.start()
 
     hotKeyManager.onPressed = { [weak self] in
+      NSLog("CursorOutline: hotkey pressed")
       DispatchQueue.main.async {
+        self?.hotKeyEventText = "Hotkey event: pressed"
         self?.overlayController.beginSpotlight()
       }
     }
     hotKeyManager.onReleased = { [weak self] in
+      NSLog("CursorOutline: hotkey released")
       DispatchQueue.main.async {
+        self?.hotKeyEventText = "Hotkey event: released"
         self?.overlayController.endSpotlight()
       }
     }
 
     registerHotKeyWithFallback()
-    showOnboardingIfNeeded()
   }
 
   func menuWillOpen(_ menu: NSMenu) {
@@ -58,8 +61,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     if let hintItem = menu.item(withTag: MenuTag.hotkeyHint.rawValue) {
       hintItem.title = hotKeyHintText
     }
+    if let hotKeyEventItem = menu.item(withTag: MenuTag.hotkeyEvent.rawValue) {
+      hotKeyEventItem.title = hotKeyEventText
+    }
     if let outlineItem = menu.item(withTag: MenuTag.outlineStatus.rawValue) {
       outlineItem.title = overlayController.outlineStatusText
+    }
+    if let diagnosticsItem = menu.item(withTag: MenuTag.diagnostics.rawValue) {
+      diagnosticsItem.title = overlayController.diagnosticsText
     }
   }
 
@@ -80,6 +89,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     do {
       try hotKeyManager.register(keyCode: primary.keyCode, modifiers: modifiers)
+      NSLog("CursorOutline: registered hotkey \(primary.combo)")
+      hotKeyEventText = "Hotkey event: registered \(primary.combo)"
       updateHint(available: true, combo: primary.combo)
       return
     } catch {
@@ -88,53 +99,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     do {
       try hotKeyManager.register(keyCode: fallback.keyCode, modifiers: modifiers)
+      NSLog("CursorOutline: registered hotkey \(fallback.combo)")
+      hotKeyEventText = "Hotkey event: registered \(fallback.combo)"
       updateHint(available: true, combo: fallback.combo)
       return
     } catch {
       updateHint(available: false, combo: primary.combo)
+      hotKeyEventText = "Hotkey event: unavailable"
       NSLog("CursorOutline: failed to register hotkey \(fallback.combo): \(error)")
-    }
-  }
-
-  private func showOnboardingIfNeeded() {
-    let key = "suppressOnboarding.v2"
-    let defaults = UserDefaults.standard
-    guard !defaults.bool(forKey: key) else { return }
-
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-      self?.presentOnboarding()
-    }
-  }
-
-  private func presentOnboarding() {
-    NSApp.activate(ignoringOtherApps: true)
-
-    let alert = NSAlert()
-    alert.alertStyle = .informational
-    alert.messageText = "Cursor Outline is running"
-
-    let hotkeyLine = hotKeyAvailable
-      ? "\(hotKeyHintText)."
-      : "\(hotKeyHintText). Another app or macOS already uses it."
-
-    alert.informativeText = [
-      "Menu bar icon: CO",
-      hotkeyLine,
-      "The display outline only appears when you have 2 or more (non-mirrored) displays, and only on the display containing the cursor.",
-    ].joined(separator: "\n")
-
-    alert.addButton(withTitle: "Test Spotlight")
-    alert.addButton(withTitle: "OK")
-    alert.addButton(withTitle: "Don't show again")
-
-    let response = alert.runModal()
-    if response == .alertFirstButtonReturn {
-      overlayController.beginSpotlight()
-      DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
-        self?.overlayController.endSpotlight()
-      }
-    } else if response == .alertThirdButtonReturn {
-      UserDefaults.standard.set(true, forKey: "suppressOnboarding.v2")
     }
   }
 
@@ -152,10 +124,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     hintItem.tag = MenuTag.hotkeyHint.rawValue
     menu.addItem(hintItem)
 
+    let hotKeyEventItem = NSMenuItem(title: hotKeyEventText, action: nil, keyEquivalent: "")
+    hotKeyEventItem.isEnabled = false
+    hotKeyEventItem.tag = MenuTag.hotkeyEvent.rawValue
+    menu.addItem(hotKeyEventItem)
+
     let outlineItem = NSMenuItem(title: overlayController.outlineStatusText, action: nil, keyEquivalent: "")
     outlineItem.isEnabled = false
     outlineItem.tag = MenuTag.outlineStatus.rawValue
     menu.addItem(outlineItem)
+
+    let diagnosticsItem = NSMenuItem(title: overlayController.diagnosticsText, action: nil, keyEquivalent: "")
+    diagnosticsItem.isEnabled = false
+    diagnosticsItem.tag = MenuTag.diagnostics.rawValue
+    menu.addItem(diagnosticsItem)
 
     menu.addItem(.separator())
 
@@ -182,6 +164,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   }
 
   @objc private func testSpotlight(_ sender: Any?) {
+    hotKeyEventText = "Hotkey event: Test Spotlight clicked"
     overlayController.beginSpotlight()
     DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
       self?.overlayController.endSpotlight()
@@ -196,6 +179,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 private enum MenuTag: Int {
   case enabled = 1
   case hotkeyHint = 2
-  case outlineStatus = 3
+  case hotkeyEvent = 3
+  case outlineStatus = 4
+  case diagnostics = 5
 }
-

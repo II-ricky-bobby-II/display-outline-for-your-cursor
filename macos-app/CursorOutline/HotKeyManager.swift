@@ -1,4 +1,5 @@
 import Carbon
+import Foundation
 
 enum HotKeyError: Error {
   case registerFailed(OSStatus)
@@ -45,6 +46,7 @@ final class HotKeyManager {
     if statusInstall != noErr {
       throw HotKeyError.installHandlerFailed(statusInstall)
     }
+    NSLog("CursorOutline: installed hotkey event handler")
 
     let statusRegister = RegisterEventHotKey(
       keyCode,
@@ -55,8 +57,10 @@ final class HotKeyManager {
       &hotKeyRef
     )
     if statusRegister != noErr {
+      unregister()
       throw HotKeyError.registerFailed(statusRegister)
     }
+    NSLog("CursorOutline: registered Carbon hotkey keyCode=\(keyCode) modifiers=\(modifiers)")
   }
 
   func unregister() {

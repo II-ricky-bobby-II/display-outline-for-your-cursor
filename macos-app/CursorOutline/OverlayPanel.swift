@@ -9,17 +9,18 @@ final class OverlayPanel: NSPanel {
 
     super.init(
       contentRect: screen.frame,
-      styleMask: [.borderless],
+      styleMask: [.borderless, .nonactivatingPanel],
       backing: .buffered,
-      defer: false,
-      screen: screen
+      defer: false
     )
 
     isOpaque = false
     backgroundColor = .clear
     hasShadow = false
+    isFloatingPanel = true
     ignoresMouseEvents = true
-    level = .statusBar
+    hidesOnDeactivate = false
+    level = .screenSaver
     collectionBehavior = [
       .canJoinAllSpaces,
       .stationary,
