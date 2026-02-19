@@ -1,26 +1,43 @@
 name: CI
 
 on:
-  push:
   pull_request:
+  push:
+    branches:
+      - main
 
 jobs:
-  lint:
-    runs-on: ubuntu-latest
+  native-build:
+    runs-on: macos-14
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install shellcheck
+      - name: Validate app metadata
         run: |
-          sudo apt-get update
-          sudo apt-get install -y shellcheck
+          plutil -lint macos-app/CursorOutline/Info.plist
 
-      - name: Shellcheck
+      - name: Verify native-surface references
         run: |
-          shellcheck install.sh uninstall.sh
+          ./scripts/check_native_surface.sh
 
-      - name: Bash syntax
+      - name: Build Debug (unsigned)
         run: |
-          bash -n install.sh
-          bash -n uninstall.sh
+          xcodebuild \
+            -project macos-app/CursorOutline.xcodeproj \
+            -scheme CursorOutline \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            build \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Build Release (unsigned)
+        run: |
+          xcodebuild \
+            -project macos-app/CursorOutline.xcodeproj \
+            -scheme CursorOutline \
+            -configuration Release \
+            -destination 'platform=macOS' \
+            build \
+            CODE_SIGNING_ALLOWED=NO

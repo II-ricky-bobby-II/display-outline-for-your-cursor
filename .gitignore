@@ -1,5 +1,4 @@
 .DS_Store
-config.lua
 
 # Xcode
 DerivedData/
@@ -11,3 +10,7 @@ xcuserdata/
 # SwiftPM
 .build/
 .swiftpm/
+
+# Release artifacts
+dist/
+*.dmg

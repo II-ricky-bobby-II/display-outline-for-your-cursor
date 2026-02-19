@@ -25,25 +25,43 @@ final class OverlayController {
     if let cursorDisplayID = ScreenUtils.cursorScreen()?.displayID, windowsByDisplayID[cursorDisplayID] == nil {
       return "Outline: Syncing displays..."
     }
-    return "Outline: On (multi display)"
-  }
-
-  var diagnosticsText: String {
-    let screenIDs = NSScreen.screens.compactMap(\.displayID)
-    let windowIDs = Array(windowsByDisplayID.keys)
-    let cursorID = ScreenUtils.cursorScreen()?.displayID
-    let cursorText = cursorID.map(String.init) ?? "nil"
-    return "Diag: screens=\(screenIDs.count) windows=\(windowIDs.count) cursor=\(cursorText)"
+    return "Outline: On"
   }
 
   private var windowsByDisplayID: [CGDirectDisplayID: OverlayPanel] = [:]
 
   private var screenObserver: Any?
+  private var workspaceObservers: [Any] = []
   private var outlineTimer: Timer?
   private var spotlightTimer: Timer?
 
   private var spotlightActive = false
   private var lastOutlineState: OutlineState?
+
+  private var outlineThickness: CGFloat = 4
+  private var outlineColor: NSColor = .controlAccentColor
+  private var spotlightRadius: CGFloat = 120
+
+  deinit {
+    stopOutlineLoop()
+    stopSpotlightLoop()
+
+    if let screenObserver {
+      NotificationCenter.default.removeObserver(screenObserver)
+    }
+
+    let workspaceCenter = NSWorkspace.shared.notificationCenter
+    for observer in workspaceObservers {
+      workspaceCenter.removeObserver(observer)
+    }
+  }
+
+  func applyAppearance(thickness: Double, color: AppColor, spotlightRadius: Double) {
+    outlineThickness = CGFloat(thickness)
+    outlineColor = color.nsColor
+    self.spotlightRadius = CGFloat(spotlightRadius)
+    updateOutline(force: true)
+  }
 
   func start() {
     refreshScreens()
@@ -53,12 +71,11 @@ final class OverlayController {
       object: nil,
       queue: .main
     ) { [weak self] _ in
-      guard let self else { return }
-      NSLog("CursorOutline: screen parameter change notification received")
-      self.refreshScreens()
-      self.updateAllVisibility()
+      self?.refreshScreens()
+      self?.updateAllVisibility()
     }
 
+    registerWorkspaceObservers()
     startOutlineLoop()
     updateAllVisibility()
   }
@@ -74,6 +91,27 @@ final class OverlayController {
     stopSpotlightLoop()
     for (_, window) in windowsByDisplayID {
       window.overlayView.setSpotlightVisible(false, animated: true)
+    }
+  }
+
+  private func registerWorkspaceObservers() {
+    let workspaceCenter = NSWorkspace.shared.notificationCenter
+
+    let observerNames: [NSNotification.Name] = [
+      NSWorkspace.didWakeNotification,
+      NSWorkspace.screensDidSleepNotification,
+      NSWorkspace.activeSpaceDidChangeNotification,
+    ]
+
+    workspaceObservers = observerNames.map { name in
+      workspaceCenter.addObserver(
+        forName: name,
+        object: nil,
+        queue: .main
+      ) { [weak self] _ in
+        self?.refreshScreens()
+        self?.updateAllVisibility()
+      }
     }
   }
 
@@ -98,8 +136,7 @@ final class OverlayController {
   private func startOutlineLoop() {
     stopOutlineLoop()
     let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
-      guard let self else { return }
-      self.updateOutline()
+      self?.updateOutline()
     }
     RunLoop.main.add(timer, forMode: .common)
     outlineTimer = timer
@@ -113,8 +150,7 @@ final class OverlayController {
   private func startSpotlightLoop() {
     if spotlightTimer != nil { return }
     let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
-      guard let self else { return }
-      self.updateSpotlight()
+      self?.updateSpotlight()
     }
     RunLoop.main.add(timer, forMode: .common)
     spotlightTimer = timer
@@ -150,9 +186,9 @@ final class OverlayController {
     }
 
     for (id, window) in windowsByDisplayID {
-      let isActive = (displayID != nil) && (id == displayID)
+      let isActive = displayID != nil && id == displayID
       if isActive {
-        window.overlayView.updateOutline(strokeColor: .controlAccentColor, thickness: 4)
+        window.overlayView.updateOutline(strokeColor: outlineColor, thickness: outlineThickness)
       }
       window.overlayView.setOutlineVisible(isActive)
     }
@@ -164,7 +200,7 @@ final class OverlayController {
 
     guard let cursorScreen = ScreenUtils.cursorScreen(), let displayID = cursorScreen.displayID else { return }
     guard let window = windowsByDisplayID[displayID] else {
-      NSLog("CursorOutline: spotlight missing overlay window for displayID=\(displayID)")
+      AppLogger.shared.log(.warning, "Spotlight missing overlay window for displayID=\(displayID)")
       return
     }
 
@@ -175,7 +211,7 @@ final class OverlayController {
     for (id, otherWindow) in windowsByDisplayID {
       if id == displayID {
         otherWindow.overlayView.setSpotlightVisible(true, animated: false)
-        otherWindow.overlayView.updateSpotlight(center: viewPoint, radius: 120)
+        otherWindow.overlayView.updateSpotlight(center: viewPoint, radius: spotlightRadius)
       } else {
         otherWindow.overlayView.setSpotlightVisible(false, animated: false)
       }
@@ -193,19 +229,16 @@ final class OverlayController {
       if let existing = windowsByDisplayID[id] {
         existing.updateFrame(for: screen)
       } else {
-        let window = OverlayPanel(screen: screen)
-        windowsByDisplayID[id] = window
-        NSLog("CursorOutline: created overlay window for displayID=\(id)")
+        windowsByDisplayID[id] = OverlayPanel(screen: screen)
+        AppLogger.shared.log(.info, "Created overlay window for displayID=\(id)")
       }
     }
 
     for (id, window) in windowsByDisplayID where !alive.contains(id) {
       window.orderOut(nil)
       windowsByDisplayID[id] = nil
-      NSLog("CursorOutline: removed overlay window for displayID=\(id)")
+      AppLogger.shared.log(.info, "Removed overlay window for displayID=\(id)")
     }
-
-    NSLog("CursorOutline: refreshScreens complete. screens=\(screens.count) windows=\(windowsByDisplayID.count)")
   }
 
   private func reconcileScreensIfNeeded() {
@@ -213,11 +246,7 @@ final class OverlayController {
     let knownIDs = Set(windowsByDisplayID.keys)
     guard liveIDs != knownIDs else { return }
 
-    NSLog("CursorOutline: reconciling screens. liveIDs=\(formatIDs(liveIDs)) knownIDs=\(formatIDs(knownIDs))")
+    AppLogger.shared.log(.info, "Reconciling screen topology")
     refreshScreens()
-  }
-
-  private func formatIDs(_ ids: Set<CGDirectDisplayID>) -> String {
-    ids.map { String($0) }.sorted().joined(separator: ",")
   }
 }

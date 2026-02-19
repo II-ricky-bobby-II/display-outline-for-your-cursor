@@ -1,9 +1,34 @@
 import Carbon
 import Foundation
 
-enum HotKeyError: Error {
-  case registerFailed(OSStatus)
+enum HotKeyRegistrationError: LocalizedError {
   case installHandlerFailed(OSStatus)
+  case registrationFailed(OSStatus)
+
+  var statusCode: OSStatus {
+    switch self {
+    case let .installHandlerFailed(code):
+      return code
+    case let .registrationFailed(code):
+      return code
+    }
+  }
+
+  var isConflict: Bool {
+    statusCode == eventHotKeyExistsErr
+  }
+
+  var errorDescription: String? {
+    switch self {
+    case let .installHandlerFailed(code):
+      return "Failed to install hotkey event handler (OSStatus \(code))."
+    case let .registrationFailed(code):
+      if code == eventHotKeyExistsErr {
+        return "The selected hotkey is already in use by another app or macOS."
+      }
+      return "Failed to register global hotkey (OSStatus \(code))."
+    }
+  }
 }
 
 final class HotKeyManager {
@@ -12,6 +37,7 @@ final class HotKeyManager {
 
   private var hotKeyRef: EventHotKeyRef?
   private var handlerRef: EventHandlerRef?
+  private(set) var activeHotKey: HotKeyConfig?
 
   private let hotKeyID: EventHotKeyID = {
     let signature = HotKeyManager.fourCharCode("COut")
@@ -26,7 +52,7 @@ final class HotKeyManager {
     return result
   }
 
-  func register(keyCode: UInt32, modifiers: UInt32) throws {
+  func register(hotKey: HotKeyConfig) throws {
     unregister()
 
     var eventTypes = [
@@ -35,7 +61,7 @@ final class HotKeyManager {
     ]
 
     let userData = Unmanaged.passUnretained(self).toOpaque()
-    let statusInstall = InstallEventHandler(
+    let installStatus = InstallEventHandler(
       GetApplicationEventTarget(),
       Self.eventHandler,
       eventTypes.count,
@@ -43,24 +69,27 @@ final class HotKeyManager {
       userData,
       &handlerRef
     )
-    if statusInstall != noErr {
-      throw HotKeyError.installHandlerFailed(statusInstall)
-    }
-    NSLog("CursorOutline: installed hotkey event handler")
 
-    let statusRegister = RegisterEventHotKey(
-      keyCode,
-      modifiers,
+    guard installStatus == noErr else {
+      throw HotKeyRegistrationError.installHandlerFailed(installStatus)
+    }
+
+    let registerStatus = RegisterEventHotKey(
+      hotKey.keyCode,
+      hotKey.modifiers,
       hotKeyID,
       GetApplicationEventTarget(),
       0,
       &hotKeyRef
     )
-    if statusRegister != noErr {
+
+    guard registerStatus == noErr else {
       unregister()
-      throw HotKeyError.registerFailed(statusRegister)
+      throw HotKeyRegistrationError.registrationFailed(registerStatus)
     }
-    NSLog("CursorOutline: registered Carbon hotkey keyCode=\(keyCode) modifiers=\(modifiers)")
+
+    activeHotKey = hotKey
+    AppLogger.shared.log(.info, "Registered global hotkey: \(hotKey.displayString)")
   }
 
   func unregister() {
@@ -68,10 +97,13 @@ final class HotKeyManager {
       UnregisterEventHotKey(hotKeyRef)
       self.hotKeyRef = nil
     }
+
     if let handlerRef {
       RemoveEventHandler(handlerRef)
       self.handlerRef = nil
     }
+
+    activeHotKey = nil
   }
 
   deinit {
@@ -92,19 +124,19 @@ final class HotKeyManager {
       nil,
       &hotKeyID
     )
-    if status != noErr {
-      return status
-    }
 
+    guard status == noErr else { return status }
     guard hotKeyID.signature == manager.hotKeyID.signature, hotKeyID.id == manager.hotKeyID.id else {
       return noErr
     }
 
-    let kind = GetEventKind(event)
-    if kind == UInt32(kEventHotKeyPressed) {
+    switch GetEventKind(event) {
+    case UInt32(kEventHotKeyPressed):
       manager.onPressed?()
-    } else if kind == UInt32(kEventHotKeyReleased) {
+    case UInt32(kEventHotKeyReleased):
       manager.onReleased?()
+    default:
+      break
     }
 
     return noErr
